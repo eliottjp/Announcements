@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Admin Panel - Announcement Manager</title>
+        <link rel="stylesheet" href="css/styles.css">
+        <script
+            src="https://cdnjs.cloudflare.com/ajax/libs/Sortable/1.15.0/Sortable.min.js"></script>
+
+    </head>
+    <body>
+        <div class="container">
+            <h1>⚙️ Admin Panel</h1>
+
+            <!-- Upload Announcement Form -->
+            <form id="uploadForm">
+                <label for="announcementTitle">🎶 Announcement Name:</label>
+                <input type="text" id="announcementTitle"
+                    placeholder="Enter announcement name..." required>
+
+                <label for="audioFile">🔊 Audio File (MP3 only):</label>
+                <input type="file" id="audioFile" accept=".mp3" required>
+
+                <label for="announcementTime">🕒 Schedule Time
+                    (Optional):</label>
+                <input type="time" id="announcementTime">
+
+                <button type="submit">➕ Upload Announcement</button>
+            </form>
+
+            <!-- Scheduled Announcements List -->
+            <h2>📋 Scheduled Announcements</h2>
+            <ul id="scheduleList">
+                <li>No announcements scheduled yet.</li>
+            </ul>
+        </div>
+
+        <script type="module" src="js/admin.js"></script>
+    </body>
+</html>

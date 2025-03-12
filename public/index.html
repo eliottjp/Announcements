@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Announcement Player</title>
+        <link rel="stylesheet" href="css/styles.css">
+    </head>
+    <body>
+
+        <div class="container">
+            <h1>📢 Announcement Player</h1>
+
+            <div class="info">
+                <p id="nextAnnouncement">Next announcement will appear here.</p>
+                <p id="countdownTimer">⏳ Time remaining: --:--</p>
+
+                <div class="progress-bar">
+                    <div id="progressFill"></div>
+                </div>
+
+                <!-- 🔊 Volume Control -->
+                <label for="volumeControl">🔊 Volume:</label>
+                <select id="volumeControl">
+                    <option value="0.3">Low</option>
+                    <option value="0.6" selected>Medium</option>
+                    <option value="1">High</option>
+                </select>
+
+                <div class="button-container">
+                    <button id="playNowButton">▶️ Play Now</button>
+                    <button id="stopButton">⏹️ Stop</button>
+                </div>
+            </div>
+
+            <h2>🔊 Upcoming Announcements</h2>
+            <ul id="currentAnnouncements"></ul>
+        </div>
+
+        <script type="module" src="js/app.js"></script>
+    </body>
+</html>
