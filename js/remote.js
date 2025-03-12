@@ -28,6 +28,9 @@ const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 const auth = getAuth(app);
 
+// 🔹 Reference for Control Commands
+const controlRef = doc(db, "globalControls", "commands");
+
 // 🔹 Sign in Anonymously
 signInAnonymously(auth)
   .then(() => {
@@ -48,11 +51,45 @@ const upcomingAnnouncementsEl = document.getElementById(
   "upcomingAnnouncements"
 );
 const refreshListButton = document.getElementById("refreshListButton");
+const soundButtonsContainer = document.getElementById("soundButtons");
+
+// 🔹 Fetch Announcements and Generate Buttons
+onSnapshot(collection(db, "announcements"), (snapshot) => {
+  soundButtonsContainer.innerHTML = ""; // Clear old buttons
+
+  snapshot.forEach((doc) => {
+    const announcementData = doc.data();
+    const title = announcementData.title;
+
+    if (!title) return; // Skip documents without a title
+
+    const button = document.createElement("button");
+    button.textContent = title;
+
+    // 🔹 Send 'preload' command with the document ID
+    button.onclick = () => sendControlCommand(`preload:${doc.id}`);
+
+    soundButtonsContainer.appendChild(button);
+  });
+});
+
+// 🔹 Send Command to Firestore
+async function sendControlCommand(command) {
+  try {
+    await updateDoc(controlRef, {
+      command,
+      commandId: crypto.randomUUID(), // Ensure each command is unique
+      timestamp: new Date().toISOString(),
+    });
+    showFeedback(`✅ Command Sent: ${command}`, "green");
+  } catch (error) {
+    console.error(`❌ Error sending command: ${error}`);
+    showFeedback(`❌ Error: ${error.message}`, "red");
+  }
+}
 
 // 🔹 Ensure Control Document Exists
 async function ensureControlDocumentExists() {
-  const controlRef = doc(db, "globalControls", "commands");
-
   const controlSnap = await getDoc(controlRef);
   if (!controlSnap.exists()) {
     await setDoc(controlRef, {
@@ -89,23 +126,6 @@ function loadUpcomingAnnouncements() {
   });
 }
 loadUpcomingAnnouncements();
-
-// 🔹 Remote Control Commands (With Unique Command ID)
-async function sendControlCommand(command) {
-  const controlRef = doc(db, "globalControls", "commands");
-
-  try {
-    await updateDoc(controlRef, {
-      command,
-      commandId: crypto.randomUUID(), // Ensure each command is unique
-      timestamp: new Date().toISOString(),
-    });
-    showFeedback(`✅ Command Sent: ${command}`, "green");
-  } catch (error) {
-    console.error(`❌ Error sending command: ${error}`);
-    showFeedback(`❌ Error: ${error.message}`, "red");
-  }
-}
 
 // 🔹 Feedback Display
 function showFeedback(message, color) {

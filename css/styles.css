@@ -258,3 +258,47 @@ button:hover {
   padding: 8px 12px;
   border-bottom: 1px solid #ccc;
 }
+
+/* 🔹 Now Playing Display */
+#nowPlaying {
+  font-weight: bold;
+  margin-top: 10px;
+}
+
+/* 🔹 Progress Bar */
+#progressBar {
+  width: 100%;
+  height: 10px;
+  background-color: #ddd;
+  border-radius: 5px;
+  overflow: hidden;
+  margin-top: 5px;
+}
+
+#progressFill {
+  width: 0%;
+  height: 100%;
+  background-color: #4caf50; /* Green progress bar */
+  transition: width 1s linear;
+}
+
+/* 🔹 Sound Button Grid */
+.sound-buttons {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.sound-buttons button {
+  padding: 10px;
+  background-color: #2196f3;
+  color: #fff;
+  border: none;
+  border-radius: 5px;
+  cursor: pointer;
+}
+
+.sound-buttons button:hover {
+  background-color: #1976d2;
+}
