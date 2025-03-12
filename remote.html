@@ -5,13 +5,20 @@
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>Remote Control Panel</title>
         <link rel="stylesheet" href="css/styles.css">
+        <script src="https://sdk.scdn.co/spotify-player.js"></script>
+
     </head>
     <body>
         <div class="container">
             <h1>🎛️ Remote Control Panel</h1>
             <div id="feedback"
                 style="margin-top: 10px; font-weight: bold;"></div>
-            <button id="refreshListButton">🔄 Refresh List</button>
+
+            <h2 id="nextUp">🎶 Next Up: </h2>
+            <h2 id="currentPlaying">🎶 Now Playing: </h2>
+            <div class="progress-bar">
+                <div id="progressFill"></div>
+            </div>
 
             <div class="controls">
                 <button id="playNowButton">▶️ Play Now</button>
@@ -26,8 +33,6 @@
                     value="1">
             </div>
 
-            <h2>🔊 Upcoming Announcements</h2>
-            <ul id="upcomingAnnouncements"></ul>
         </div>
 
         <script type="module" src="js/remote.js"></script>

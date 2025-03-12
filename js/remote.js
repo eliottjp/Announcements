@@ -6,12 +6,11 @@ import {
 
 import {
   getFirestore,
-  collection,
-  onSnapshot,
   doc,
   getDoc,
   setDoc,
   updateDoc,
+  onSnapshot,
 } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
 // 🔹 Firebase Config
@@ -27,58 +26,154 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 const auth = getAuth(app);
-
-// 🔹 Reference for Control Commands
 const controlRef = doc(db, "globalControls", "commands");
+
+// 🔹 Predefined Sound Queue (Short Durations)
+const soundQueue = [
+  { title: "5 Mins", url: "sounds/5-mins.mp3", duration: 8 }, // 8 seconds
+  { title: "2 Mins", url: "sounds/2-mins.mp3", duration: 6 }, // 6 seconds
+  { title: "5 Mins Interval", url: "sounds/5-mins-interval.mp3", duration: 5 }, // 5 seconds
+  { title: "2 Mins Interval", url: "sounds/2-mins-interval.mp3", duration: 4 }, // 4 seconds
+];
+
+let currentSoundIndex = 0;
+let playedAnnouncements = [];
 
 // 🔹 Sign in Anonymously
 signInAnonymously(auth)
-  .then(() => {
-    console.log("✅ Successfully signed in anonymously");
-  })
+  .then(() => console.log("✅ Successfully signed in anonymously"))
   .catch((error) => {
     console.error("❌ Error signing in:", error);
     alert("❌ Authentication error. Please refresh the page.");
   });
 
-// 🔹 DOM Elements
-const playNowButton = document.getElementById("playNowButton");
-const pauseButton = document.getElementById("pauseButton");
-const resumeButton = document.getElementById("resumeButton");
-const stopButton = document.getElementById("stopButton");
-const volumeSlider = document.getElementById("volumeSlider");
-const upcomingAnnouncementsEl = document.getElementById(
-  "upcomingAnnouncements"
-);
-const refreshListButton = document.getElementById("refreshListButton");
-const soundButtonsContainer = document.getElementById("soundButtons");
+// 🔹 Update "Next Up" Display
+function updateNextUp() {
+  const nextSound = soundQueue[currentSoundIndex];
+  document.getElementById(
+    "nextUp"
+  ).textContent = `🎶 Next Up: ${nextSound.title}`;
+}
+updateNextUp(); // Initialize on page load
 
-// 🔹 Fetch Announcements and Generate Buttons
-onSnapshot(collection(db, "announcements"), (snapshot) => {
-  soundButtonsContainer.innerHTML = ""; // Clear old buttons
+// 🔹 Real-Time Listener for "Now Playing", Progress Bar, and Played List
+onSnapshot(controlRef, (docSnap) => {
+  const data = docSnap.data();
+  if (!data) return;
 
-  snapshot.forEach((doc) => {
-    const announcementData = doc.data();
-    const title = announcementData.title;
+  // 🔹 Update "Now Playing" in Real-Time
+  document.getElementById("currentPlaying").textContent = `🎵 Now Playing: ${
+    data.nowPlaying || "None"
+  }`;
 
-    if (!title) return; // Skip documents without a title
+  // 🔹 Start Progress Bar when new sound plays
+  if (data.duration && data.startTime) {
+    startProgressBar(data.duration, data.startTime);
+  }
 
-    const button = document.createElement("button");
-    button.textContent = title;
-
-    // 🔹 Send 'preload' command with the document ID
-    button.onclick = () => sendControlCommand(`preload:${doc.id}`);
-
-    soundButtonsContainer.appendChild(button);
-  });
+  // 🔹 Update Played List (Highlight Played)
+  if (data.playedList) {
+    playedAnnouncements = data.playedList;
+    updatePlayedList();
+  }
 });
 
+// 🔹 Start Progress Bar & Countdown Timer (Fix for Short Durations)
+function startProgressBar(duration, startTime) {
+  const progressBar = document.getElementById("progressFill");
+  const countdownEl = document.getElementById("countdownTimer");
+
+  let endTime = startTime + duration * 1000; // Convert seconds to milliseconds
+
+  function updateProgress() {
+    const now = Date.now();
+    let remainingTime = Math.max((endTime - now) / 1000, 0); // Prevent negative values
+    let elapsedTime = duration - remainingTime;
+
+    let progress = (elapsedTime / duration) * 100;
+    progressBar.style.width = `${progress}%`;
+
+    // 🔹 Update countdown text (e.g., "0:03 remaining")
+    let seconds = Math.floor(remainingTime);
+    countdownEl.textContent = `⏳ ${seconds
+      .toString()
+      .padStart(2, "0")} sec remaining`;
+
+    if (remainingTime > 0) {
+      requestAnimationFrame(updateProgress);
+    } else {
+      progressBar.style.width = "100%";
+      countdownEl.textContent = "✅ Announcement Complete";
+    }
+  }
+
+  updateProgress(); // Start the progress update loop
+}
+
+// 🔹 Play Next Sound in Queue
+async function playNextInQueue() {
+  const nextSound = soundQueue[currentSoundIndex];
+  currentSoundIndex = (currentSoundIndex + 1) % soundQueue.length;
+
+  updateNextUp(); // Update "Next Up" display
+
+  // 🔹 Track Played Announcements
+  playedAnnouncements.push(nextSound.title);
+
+  await updateDoc(controlRef, {
+    command: `play:${nextSound.url}`,
+    nowPlaying: nextSound.title,
+    duration: nextSound.duration,
+    startTime: Date.now(),
+    playedList: playedAnnouncements, // Save played announcements
+    timestamp: new Date().toISOString(),
+  });
+
+  showFeedback(`▶️ Sent Command: Play "${nextSound.title}"`, "green");
+}
+
+// 🔹 Update Played Announcements List
+function updatePlayedList() {
+  const playedListEl = document.getElementById("playedAnnouncements");
+  playedListEl.innerHTML = "";
+
+  soundQueue.forEach((sound) => {
+    const listItem = document.createElement("li");
+    listItem.textContent = sound.title;
+
+    if (playedAnnouncements.includes(sound.title)) {
+      listItem.style.color = "green"; // ✅ Highlight played sounds
+    }
+
+    playedListEl.appendChild(listItem);
+  });
+}
+
+// 🔹 Pause Announcement
+async function pauseSound() {
+  await sendCommand("pause");
+}
+
+// 🔹 Resume Announcement
+async function resumeSound() {
+  await sendCommand("resume");
+}
+
+// 🔹 Stop Announcement
+async function stopSound() {
+  await sendCommand("stop");
+}
+
+// 🔹 Set Volume
+function setVolume(volume) {
+  sendCommand(`volume:${volume}`);
+}
+
 // 🔹 Send Command to Firestore
-async function sendControlCommand(command) {
+async function sendCommand(command) {
   try {
     await updateDoc(controlRef, {
       command,
-      commandId: crypto.randomUUID(), // Ensure each command is unique
       timestamp: new Date().toISOString(),
     });
     showFeedback(`✅ Command Sent: ${command}`, "green");
@@ -87,45 +182,6 @@ async function sendControlCommand(command) {
     showFeedback(`❌ Error: ${error.message}`, "red");
   }
 }
-
-// 🔹 Ensure Control Document Exists
-async function ensureControlDocumentExists() {
-  const controlSnap = await getDoc(controlRef);
-  if (!controlSnap.exists()) {
-    await setDoc(controlRef, {
-      command: "none",
-      commandId: "",
-      timestamp: new Date().toISOString(),
-    });
-  }
-}
-ensureControlDocumentExists();
-
-// 🔹 Sync with Firestore for Upcoming Announcements
-function loadUpcomingAnnouncements() {
-  onSnapshot(collection(db, "announcements"), (snapshot) => {
-    const announcements = snapshot.docs.map((doc) => ({
-      id: doc.id,
-      ...doc.data(),
-    }));
-
-    upcomingAnnouncementsEl.innerHTML = "";
-
-    if (announcements.length === 0) {
-      upcomingAnnouncementsEl.innerHTML = "<li>❌ No announcements found.</li>";
-      return;
-    }
-
-    announcements.forEach((announcement) => {
-      const listItem = document.createElement("li");
-      listItem.textContent = `🎵 ${announcement.title} - ${
-        announcement.scheduledTime || "No time set"
-      }`;
-      upcomingAnnouncementsEl.appendChild(listItem);
-    });
-  });
-}
-loadUpcomingAnnouncements();
 
 // 🔹 Feedback Display
 function showFeedback(message, color) {
@@ -136,14 +192,12 @@ function showFeedback(message, color) {
 }
 
 // 🔹 Button Click Handlers
-playNowButton.addEventListener("click", () => sendControlCommand("playNow"));
-pauseButton.addEventListener("click", () => sendControlCommand("pause"));
-resumeButton.addEventListener("click", () => sendControlCommand("resume"));
-stopButton.addEventListener("click", () => sendControlCommand("stop"));
-refreshListButton.addEventListener("click", loadUpcomingAnnouncements);
-
-// 🔹 Volume Control (Ensures Precision to Avoid Failures)
-volumeSlider.addEventListener("input", () => {
-  const volume = parseFloat(volumeSlider.value).toFixed(2);
-  sendControlCommand(`volume:${volume}`);
+document
+  .getElementById("playNowButton")
+  .addEventListener("click", playNextInQueue);
+document.getElementById("pauseButton").addEventListener("click", pauseSound);
+document.getElementById("resumeButton").addEventListener("click", resumeSound);
+document.getElementById("stopButton").addEventListener("click", stopSound);
+document.getElementById("volumeSlider").addEventListener("input", (e) => {
+  setVolume(parseFloat(e.target.value));
 });

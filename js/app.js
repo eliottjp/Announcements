@@ -1,14 +1,11 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
 import {
   getFirestore,
-  collection,
   doc,
   getDoc,
   setDoc,
   onSnapshot,
   updateDoc,
-  query,
-  orderBy,
 } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
 // 🔹 Firebase Config
@@ -23,243 +20,200 @@ const firebaseConfig = {
 
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
-
 const controlRef = doc(db, "globalControls", "commands");
 
-// 🔹 Ensure Control Document Exists
-async function ensureControlDocumentExists() {
-  try {
-    const controlSnap = await getDoc(controlRef);
-    if (!controlSnap.exists()) {
-      await setDoc(controlRef, {
-        command: "none",
-        timestamp: new Date().toISOString(),
-      });
-    }
-  } catch (error) {
-    console.error("❌ Error ensuring control document exists:", error);
-    alert("❌ Permission issue detected. Please check Firestore rules.");
-  }
+// 🔹 Predefined Sound Queue
+const soundQueue = [
+  { title: "5 Mins", url: "sounds/5-mins.mp3" },
+  { title: "2 Mins", url: "sounds/2-mins.mp3" },
+  { title: "5 Mins Interval", url: "sounds/5-mins-interval.mp3" },
+  { title: "2 Mins Interval", url: "sounds/2-mins-interval.mp3" },
+];
+
+// 🔹 Chime Sound
+const chimeSound = new Audio("sounds/chime.mp3");
+
+let currentAudio = null;
+let isPlaying = false;
+let currentSoundIndex = 0;
+let hasUserInteracted = false;
+
+// 🔹 Ensure User Interaction
+document.addEventListener("click", () => {
+  hasUserInteracted = true;
+});
+
+// 🔹 Update "Next Up" Display
+function updateNextUp() {
+  const nextSound = soundQueue[currentSoundIndex];
+  document.getElementById(
+    "nextUp"
+  ).textContent = `🎶 Next Up: ${nextSound.title}`;
 }
-ensureControlDocumentExists();
+updateNextUp(); // Initialize on page load
 
-// 🔹 Real-Time Remote Control Listener
-onSnapshot(controlRef, (doc) => {
-  const commandData = doc.data();
-  if (!commandData || !commandData.command) return;
+// 🔹 Real-Time Firestore Listener for Remote Commands
+onSnapshot(controlRef, async (docSnap) => {
+  const data = docSnap.data();
+  if (!data || !data.command) return;
 
-  const command = commandData.command;
+  const command = data.command;
   console.log(`🔹 Received Command: ${command}`);
 
-  switch (command) {
-    case "playNow":
-      playNextAnnouncement();
-      break;
-    case "pause":
-      if (currentAudio) currentAudio.pause();
-      break;
-    case "resume":
-      if (currentAudio) currentAudio.play();
-      break;
-    case "stop":
-      stopAudio();
-      break;
-    default:
-      if (command.startsWith("volume:")) {
-        const volume = parseFloat(command.split(":")[1]);
-        if (currentAudio) currentAudio.volume = volume;
-      } else {
-        console.warn(`⚠️ Unknown Command Received: ${command}`);
-      }
+  if (command.startsWith("play:")) {
+    const soundUrl = command.split("play:")[1];
+    if (!isPlaying) {
+      await playSoundByUrl(soundUrl);
+    }
+  } else if (command === "pause") {
+    pauseSound();
+  } else if (command === "resume") {
+    resumeSound();
+  } else if (command === "stop") {
+    stopSound();
+  } else if (command.startsWith("volume:")) {
+    setVolume(parseFloat(command.split(":")[1]));
   }
 });
 
-// 🔹 DOM Elements
-const nextAnnouncementEl = document.getElementById("nextAnnouncement");
-const countdownTimerEl = document.getElementById("countdownTimer");
-const progressFill = document.getElementById("progressFill");
-const volumeControl = document.getElementById("volumeControl");
-const playNowButton = document.getElementById("playNowButton");
-const stopButton = document.getElementById("stopButton");
-const currentAnnouncementsEl = document.getElementById("currentAnnouncements");
-
-let announcements = [];
-let playedAnnouncements =
-  JSON.parse(localStorage.getItem("playedAnnouncements")) || [];
-let currentAudio = null;
-
-// 🔹 PA Sound Effect (Ensure this file exists in your project)
-const paSound = new Audio("sounds/pa-sound.mp3");
-paSound.volume = 0.5;
-
-// 🔹 Real-Time Firestore Listener with `orderBy` for Correct Sorting
-onSnapshot(
-  query(collection(db, "announcements"), orderBy("order")),
-  (snapshot) => {
-    announcements = snapshot.docs.map((doc) => ({
-      id: doc.id,
-      ...doc.data(),
-    }));
-
-    if (announcements.length === 0) {
-      nextAnnouncementEl.textContent = "No upcoming announcements.";
-      countdownTimerEl.textContent = "";
-      return;
-    }
-
-    // 🔹 Display Upcoming Announcements
-    currentAnnouncementsEl.innerHTML = "";
-    announcements.forEach((announcement) => {
-      const listItem = document.createElement("li");
-      listItem.textContent = `🎵 ${announcement.title} - ${
-        announcement.scheduledTime || "No time set"
-      }`;
-      currentAnnouncementsEl.appendChild(listItem);
-    });
-
-    scheduleNextAnnouncement();
-  },
-  (error) => {
-    console.error("❌ Firestore Permission Error:", error.message);
-    alert("❌ Permission denied. Please check Firestore rules.");
-  }
-);
-
-// 🔹 Schedule the Next Announcement
-function scheduleNextAnnouncement() {
-  const now = new Date();
-  const currentTime = now.toTimeString().slice(0, 5);
-
-  const nextAnnouncement = announcements.find(
-    (announcement) =>
-      announcement.scheduledTime > currentTime &&
-      !playedAnnouncements.includes(announcement.id)
-  );
-
-  if (!nextAnnouncement) {
-    nextAnnouncementEl.textContent = "✅ All announcements played.";
-    countdownTimerEl.textContent = "";
+// 🔹 Play Sound with Chime Before Announcement
+async function playSoundByUrl(url) {
+  if (!hasUserInteracted) {
+    console.warn("⚠️ User interaction required before playing audio.");
+    alert("⚠️ Please click anywhere on the page before playing audio.");
     return;
   }
 
-  const [hour, minute] = nextAnnouncement.scheduledTime.split(":").map(Number);
-  const scheduledTime = new Date(
-    now.getFullYear(),
-    now.getMonth(),
-    now.getDate(),
-    hour,
-    minute
-  );
-
-  const timeUntilNext = scheduledTime.getTime() - now.getTime();
-
-  nextAnnouncementEl.textContent = `Next: ${nextAnnouncement.title} at ${nextAnnouncement.scheduledTime}`;
-  updateCountdownTimer(timeUntilNext);
-
-  setTimeout(() => {
-    playAudio(nextAnnouncement.audioURL, nextAnnouncement.title);
-    playedAnnouncements.push(nextAnnouncement.id);
-    localStorage.setItem(
-      "playedAnnouncements",
-      JSON.stringify(playedAnnouncements)
-    );
-
-    scheduleNextAnnouncement();
-  }, timeUntilNext);
-}
-
-// 🔹 Countdown Timer
-function updateCountdownTimer(timeUntilNext) {
-  const interval = setInterval(() => {
-    timeUntilNext -= 1000;
-
-    if (timeUntilNext <= 0) {
-      countdownTimerEl.textContent = "🟢 Playing now!";
-      clearInterval(interval);
-    } else {
-      countdownTimerEl.textContent = `⏳ Time remaining: ${Math.floor(
-        timeUntilNext / 60000
-      )}:${String(Math.floor((timeUntilNext % 60000) / 1000)).padStart(
-        2,
-        "0"
-      )}`;
-    }
-  }, 1000);
-}
-
-// 🔹 Play Audio with PA Sound and Progress Bar
-function playAudio(url, title) {
-  stopAudio();
-
-  paSound
-    .play()
-    .then(() => {
-      paSound.onended = () => {
-        startAnnouncement(url);
-      };
-    })
-    .catch((err) => {
-      console.error("❌ Error playing PA sound:", err);
-      startAnnouncement(url); // Start announcement if PA sound fails
-    });
-}
-
-// 🔹 Start Announcement After PA Sound
-function startAnnouncement(url) {
-  currentAudio = new Audio(url);
-  currentAudio.volume = parseFloat(volumeControl.value);
-
-  currentAudio.play().catch((err) => {
-    console.error("Error playing audio:", err);
-    alert("❌ Error playing the announcement.");
-  });
-
-  // 🔹 Progress Bar
-  progressFill.style.width = "0%";
-  const interval = setInterval(() => {
-    if (currentAudio && !isNaN(currentAudio.duration)) {
-      const progress = (currentAudio.currentTime / currentAudio.duration) * 100;
-      progressFill.style.width = `${progress}%`;
-    }
-
-    if (!currentAudio || currentAudio.ended) {
-      clearInterval(interval);
-    }
-  }, 500);
-
-  nextAnnouncementEl.className = "now-playing";
-}
-
-// 🔹 Stop Audio Function
-function stopAudio() {
-  if (paSound) {
-    paSound.pause();
-    paSound.currentTime = 0;
+  if (isPlaying) {
+    console.log("⚠️ Already playing, ignoring new play request.");
+    return;
   }
 
+  const sound = soundQueue.find((s) => s.url === url);
+  if (!sound) {
+    console.warn("❌ Sound not found:", url);
+    return;
+  }
+
+  console.log(`▶️ Playing: ${sound.title}`);
+
+  try {
+    isPlaying = true;
+
+    // 🔹 Play Chime First
+    chimeSound
+      .play()
+      .then(() => {
+        chimeSound.onended = async () => {
+          currentAudio = new Audio(url);
+          currentAudio.volume = parseFloat(
+            document.getElementById("volumeControl").value
+          );
+
+          currentAudio
+            .play()
+            .then(() => {
+              document.getElementById(
+                "nextAnnouncement"
+              ).textContent = `🎵 Now Playing: ${sound.title}`;
+              updateProgressBar();
+            })
+            .catch((error) => {
+              console.error("❌ Error playing announcement:", error);
+              isPlaying = false;
+            });
+
+          currentAudio.onended = () => {
+            isPlaying = false;
+            document.getElementById("nextAnnouncement").textContent =
+              "Next announcement will appear here.";
+            updateNextUp();
+          };
+        };
+      })
+      .catch((error) => {
+        console.error("❌ Error playing chime:", error);
+        isPlaying = false;
+      });
+  } catch (error) {
+    console.error("❌ Error playing audio:", error);
+    isPlaying = false;
+  }
+}
+
+// 🔹 Play Next Sound in Queue
+async function playNextInQueue() {
+  if (isPlaying) {
+    console.log("⚠️ Already playing, ignoring request.");
+    return;
+  }
+
+  const nextSound = soundQueue[currentSoundIndex];
+  currentSoundIndex = (currentSoundIndex + 1) % soundQueue.length;
+
+  updateNextUp(); // Update "Next Up" display
+
+  await updateDoc(controlRef, {
+    command: `play:${nextSound.url}`,
+    timestamp: new Date().toISOString(),
+  });
+}
+
+// 🔹 Pause Sound
+function pauseSound() {
+  if (currentAudio && !currentAudio.paused) {
+    currentAudio.pause();
+    console.log("⏸️ Paused");
+  }
+}
+
+// 🔹 Resume Sound
+function resumeSound() {
+  if (currentAudio && currentAudio.paused) {
+    currentAudio
+      .play()
+      .catch((error) => console.error("❌ Error resuming audio:", error));
+    console.log("▶️ Resumed");
+  }
+}
+
+// 🔹 Stop Sound
+function stopSound() {
   if (currentAudio) {
     currentAudio.pause();
     currentAudio.currentTime = 0;
-    progressFill.style.width = "0%";
-    currentAudio = null;
+    isPlaying = false;
+    document.getElementById("progressFill").style.width = "0%";
   }
+}
+
+// 🔹 Set Volume
+function setVolume(volume) {
+  if (currentAudio) {
+    currentAudio.volume = volume;
+  }
+}
+
+// 🔹 Update Progress Bar
+function updateProgressBar() {
+  if (!currentAudio) return;
+  const progressBar = document.getElementById("progressFill");
+
+  const interval = setInterval(() => {
+    if (!currentAudio || currentAudio.ended) {
+      clearInterval(interval);
+      return;
+    }
+
+    const progress = (currentAudio.currentTime / currentAudio.duration) * 100;
+    progressBar.style.width = `${progress}%`;
+  }, 500);
 }
 
 // 🔹 "Play Now" Button
-playNowButton.addEventListener("click", () => {
-  playNextAnnouncement();
-});
+document
+  .getElementById("playNowButton")
+  .addEventListener("click", playNextInQueue);
 
 // 🔹 "Stop" Button
-stopButton.addEventListener("click", stopAudio);
-
-// 🔹 Play Next Announcement Function
-function playNextAnnouncement() {
-  if (announcements.length === 0) {
-    alert("No announcements to play.");
-    return;
-  }
-
-  const nextAnnouncement = announcements[0];
-  playAudio(nextAnnouncement.audioURL, nextAnnouncement.title);
-}
+document.getElementById("stopButton").addEventListener("click", stopSound);
