@@ -1,11 +1,17 @@
 // admin.js
 
-// Cloudinary Configuration
+// 🔹 Cloudinary Configuration
 const CLOUDINARY_URL = "https://api.cloudinary.com/v1_1/dq6nfmu1g/upload";
 const CLOUDINARY_UPLOAD_PRESET = "announcement_preset";
 
-// Firestore Configuration
+// 🔹 Firebase Configuration
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
+import {
+  getAuth,
+  signInAnonymously,
+  onAuthStateChanged,
+} from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
+
 import {
   getFirestore,
   collection,
@@ -13,8 +19,11 @@ import {
   deleteDoc,
   updateDoc,
   doc,
+  getDocs,
   onSnapshot,
   serverTimestamp,
+  query,
+  orderBy,
 } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
 const firebaseConfig = {
@@ -27,10 +36,30 @@ const firebaseConfig = {
 };
 
 const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
 const db = getFirestore(app);
 const scheduleList = document.getElementById("scheduleList");
 
-// Enable Drag-and-Drop
+// 🔹 Sign in Anonymously
+signInAnonymously(auth)
+  .then(() => {
+    console.log("✅ Successfully signed in anonymously");
+    displayAnnouncements(); // Load announcements after successful auth
+  })
+  .catch((error) => {
+    console.error("❌ Error signing in:", error);
+    alert("❌ Authentication error. Please refresh the page.");
+  });
+
+// 🔹 Ensure Admin-Only Actions
+onAuthStateChanged(auth, (user) => {
+  if (!user) {
+    alert("❌ You must be authenticated to manage announcements.");
+    document.body.innerHTML = "<h2>🔒 Access Denied: Please Refresh</h2>";
+  }
+});
+
+// 🔹 Enable Drag-and-Drop
 const sortable = new Sortable(scheduleList, {
   animation: 150,
   onEnd: async (event) => {
@@ -42,7 +71,7 @@ const sortable = new Sortable(scheduleList, {
   },
 });
 
-// Form Submission
+// 🔹 Form Submission
 const uploadForm = document.getElementById("uploadForm");
 
 uploadForm.addEventListener("submit", async (e) => {
@@ -54,7 +83,7 @@ uploadForm.addEventListener("submit", async (e) => {
     document.getElementById("announcementTime").value || null;
 
   if (!title || !audioFile) {
-    alert("Please fill in all fields.");
+    alert("❌ Please fill in all fields.");
     return;
   }
 
@@ -68,26 +97,40 @@ uploadForm.addEventListener("submit", async (e) => {
       body: formData,
     });
 
-    const data = await response.json();
+    const responseText = await response.text(); // Capture full response as text
+    console.log("🌍 Cloudinary Response:", responseText);
+
+    const data = JSON.parse(responseText);
+
+    if (!data.secure_url) {
+      throw new Error(
+        `❌ Cloudinary Error: ${data.error?.message || "Unknown error"}`
+      );
+    }
+
     const audioURL = data.secure_url;
 
-    // Save to Firestore
+    // Save to Firestore with `order` for sorting
     await addDoc(collection(db, "announcements"), {
       title,
       audioURL,
       scheduledTime,
+      order: Date.now(), // Ensures correct order if added quickly
       timestamp: new Date().toISOString(),
     });
 
     alert("✅ Announcement uploaded successfully!");
-    displayAnnouncements();
   } catch (error) {
-    console.error("Error uploading file:", error);
-    alert("❌ Failed to upload announcement. Please try again.");
+    console.error("❌ Error uploading file:", error);
+    alert(
+      `❌ Failed to upload announcement. ${
+        error.message || "Please try again."
+      }`
+    );
   }
 });
 
-// Display Announcements
+// 🔹 Display Announcements
 async function displayAnnouncements() {
   scheduleList.innerHTML = ""; // Clear existing content
   const querySnapshot = await getDocs(collection(db, "announcements"));
@@ -97,8 +140,8 @@ async function displayAnnouncements() {
     return;
   }
 
-  querySnapshot.forEach((doc) => {
-    const { title, audioURL } = doc.data();
+  querySnapshot.forEach((docSnap) => {
+    const { title, audioURL } = docSnap.data();
     const listItem = document.createElement("li");
     listItem.innerHTML = `🎵 <strong>${title}</strong> - <a href="${audioURL}" target="_blank">Listen</a>`;
     scheduleList.appendChild(listItem);
@@ -107,25 +150,25 @@ async function displayAnnouncements() {
 
 displayAnnouncements();
 
-// Load Announcements from Firestore
+// 🔹 Load Announcements from Firestore
 async function loadAnnouncements() {
   const querySnapshot = await getDocs(collection(db, "announcements"));
   scheduleList.innerHTML = "";
 
-  querySnapshot.forEach((doc) => {
-    const data = doc.data();
+  querySnapshot.forEach((docSnap) => {
+    const data = docSnap.data();
     const listItem = document.createElement("li");
     listItem.textContent = `${data.title} - ${
       data.scheduledTime || "No time set"
     }`;
-    listItem.dataset.id = doc.id;
+    listItem.dataset.id = docSnap.id;
     scheduleList.appendChild(listItem);
   });
 }
 
 loadAnnouncements();
 
-// Real-Time Firestore Listener
+// 🔹 Real-Time Firestore Listener
 onSnapshot(collection(db, "announcements"), (snapshot) => {
   scheduleList.innerHTML = ""; // Clear old list
 
@@ -134,13 +177,14 @@ onSnapshot(collection(db, "announcements"), (snapshot) => {
     return;
   }
 
-  snapshot.docs.forEach((doc) => {
-    const data = doc.data();
+  snapshot.docs.forEach((docSnap) => {
+    const data = docSnap.data();
     const listItem = document.createElement("li");
 
     listItem.textContent = `🎵 ${data.title} - ${
       data.scheduledTime || "No Time Set"
     }`;
+
     scheduleList.appendChild(listItem);
   });
 });

@@ -2,7 +2,13 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebas
 import {
   getFirestore,
   collection,
+  doc,
+  getDoc,
+  setDoc,
   onSnapshot,
+  updateDoc,
+  query,
+  orderBy,
 } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
 // 🔹 Firebase Config
@@ -20,20 +26,51 @@ const db = getFirestore(app);
 
 const controlRef = doc(db, "globalControls", "commands");
 
-onSnapshot(controlRef, (doc) => {
-  const command = doc.data().command;
+// 🔹 Ensure Control Document Exists
+async function ensureControlDocumentExists() {
+  try {
+    const controlSnap = await getDoc(controlRef);
+    if (!controlSnap.exists()) {
+      await setDoc(controlRef, {
+        command: "none",
+        timestamp: new Date().toISOString(),
+      });
+    }
+  } catch (error) {
+    console.error("❌ Error ensuring control document exists:", error);
+    alert("❌ Permission issue detected. Please check Firestore rules.");
+  }
+}
+ensureControlDocumentExists();
 
-  if (command === "playNow") {
-    playNextAnnouncement();
-  } else if (command === "pause") {
-    if (currentAudio) currentAudio.pause();
-  } else if (command === "resume") {
-    if (currentAudio) currentAudio.play();
-  } else if (command === "stop") {
-    stopAudio();
-  } else if (command.startsWith("volume:")) {
-    const volume = parseFloat(command.split(":")[1]);
-    if (currentAudio) currentAudio.volume = volume;
+// 🔹 Real-Time Remote Control Listener
+onSnapshot(controlRef, (doc) => {
+  const commandData = doc.data();
+  if (!commandData || !commandData.command) return;
+
+  const command = commandData.command;
+  console.log(`🔹 Received Command: ${command}`);
+
+  switch (command) {
+    case "playNow":
+      playNextAnnouncement();
+      break;
+    case "pause":
+      if (currentAudio) currentAudio.pause();
+      break;
+    case "resume":
+      if (currentAudio) currentAudio.play();
+      break;
+    case "stop":
+      stopAudio();
+      break;
+    default:
+      if (command.startsWith("volume:")) {
+        const volume = parseFloat(command.split(":")[1]);
+        if (currentAudio) currentAudio.volume = volume;
+      } else {
+        console.warn(`⚠️ Unknown Command Received: ${command}`);
+      }
   }
 });
 
@@ -53,35 +90,40 @@ let currentAudio = null;
 
 // 🔹 PA Sound Effect (Ensure this file exists in your project)
 const paSound = new Audio("sounds/pa-sound.mp3");
-paSound.volume = 0.5; // Default volume for PA sound
+paSound.volume = 0.5;
 
-// 🔹 Real-Time Firestore Listener
-onSnapshot(collection(db, "announcements"), (snapshot) => {
-  announcements = snapshot.docs.map((doc) => ({
-    id: doc.id,
-    ...doc.data(),
-  }));
+// 🔹 Real-Time Firestore Listener with `orderBy` for Correct Sorting
+onSnapshot(
+  query(collection(db, "announcements"), orderBy("order")),
+  (snapshot) => {
+    announcements = snapshot.docs.map((doc) => ({
+      id: doc.id,
+      ...doc.data(),
+    }));
 
-  if (announcements.length === 0) {
-    nextAnnouncementEl.textContent = "No upcoming announcements.";
-    countdownTimerEl.textContent = "";
-    return;
+    if (announcements.length === 0) {
+      nextAnnouncementEl.textContent = "No upcoming announcements.";
+      countdownTimerEl.textContent = "";
+      return;
+    }
+
+    // 🔹 Display Upcoming Announcements
+    currentAnnouncementsEl.innerHTML = "";
+    announcements.forEach((announcement) => {
+      const listItem = document.createElement("li");
+      listItem.textContent = `🎵 ${announcement.title} - ${
+        announcement.scheduledTime || "No time set"
+      }`;
+      currentAnnouncementsEl.appendChild(listItem);
+    });
+
+    scheduleNextAnnouncement();
+  },
+  (error) => {
+    console.error("❌ Firestore Permission Error:", error.message);
+    alert("❌ Permission denied. Please check Firestore rules.");
   }
-
-  announcements.sort((a, b) => a.scheduledTime.localeCompare(b.scheduledTime));
-
-  // 🔹 Display Upcoming Announcements
-  currentAnnouncementsEl.innerHTML = "";
-  announcements.forEach((announcement) => {
-    const listItem = document.createElement("li");
-    listItem.textContent = `🎵 ${announcement.title} - ${
-      announcement.scheduledTime || "No time set"
-    }`;
-    currentAnnouncementsEl.appendChild(listItem);
-  });
-
-  scheduleNextAnnouncement();
-});
+);
 
 // 🔹 Schedule the Next Announcement
 function scheduleNextAnnouncement() {
@@ -111,13 +153,6 @@ function scheduleNextAnnouncement() {
 
   const timeUntilNext = scheduledTime.getTime() - now.getTime();
 
-  // 🔹 Visual Cues
-  if (timeUntilNext <= 300000) {
-    nextAnnouncementEl.className = "coming-soon"; // 🟠 Less than 5 mins
-  } else {
-    nextAnnouncementEl.className = ""; // Default state
-  }
-
   nextAnnouncementEl.textContent = `Next: ${nextAnnouncement.title} at ${nextAnnouncement.scheduledTime}`;
   updateCountdownTimer(timeUntilNext);
 
@@ -135,15 +170,6 @@ function scheduleNextAnnouncement() {
 
 // 🔹 Countdown Timer
 function updateCountdownTimer(timeUntilNext) {
-  function formatTime(ms) {
-    const minutes = Math.floor(ms / 60000);
-    const seconds = Math.floor((ms % 60000) / 1000);
-    return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(
-      2,
-      "0"
-    )}`;
-  }
-
   const interval = setInterval(() => {
     timeUntilNext -= 1000;
 
@@ -151,8 +177,11 @@ function updateCountdownTimer(timeUntilNext) {
       countdownTimerEl.textContent = "🟢 Playing now!";
       clearInterval(interval);
     } else {
-      countdownTimerEl.textContent = `⏳ Time remaining: ${formatTime(
-        timeUntilNext
+      countdownTimerEl.textContent = `⏳ Time remaining: ${Math.floor(
+        timeUntilNext / 60000
+      )}:${String(Math.floor((timeUntilNext % 60000) / 1000)).padStart(
+        2,
+        "0"
       )}`;
     }
   }, 1000);
@@ -160,39 +189,45 @@ function updateCountdownTimer(timeUntilNext) {
 
 // 🔹 Play Audio with PA Sound and Progress Bar
 function playAudio(url, title) {
-  stopAudio(); // Stop any currently playing audio
+  stopAudio();
 
-  // Step 1: Play the PA Sound First
   paSound
     .play()
     .then(() => {
-      // Step 2: After PA Sound Ends, Play the Announcement
       paSound.onended = () => {
-        currentAudio = new Audio(url);
-        currentAudio.volume = parseFloat(volumeControl.value);
-
-        currentAudio.play().catch((err) => {
-          console.error("Error playing audio:", err);
-          alert("❌ Error playing the announcement.");
-        });
-
-        // 🔹 Progress Bar
-        progressFill.style.width = "0%";
-        const interval = setInterval(() => {
-          const progress =
-            (currentAudio.currentTime / currentAudio.duration) * 100;
-          progressFill.style.width = `${progress}%`;
-
-          if (progress >= 100) clearInterval(interval);
-        }, 500);
-
-        nextAnnouncementEl.className = "now-playing"; // 🟢 Visual Cue for "Now Playing"
+        startAnnouncement(url);
       };
     })
     .catch((err) => {
-      console.error("Error playing PA sound:", err);
-      alert("❌ Error playing the PA sound.");
+      console.error("❌ Error playing PA sound:", err);
+      startAnnouncement(url); // Start announcement if PA sound fails
     });
+}
+
+// 🔹 Start Announcement After PA Sound
+function startAnnouncement(url) {
+  currentAudio = new Audio(url);
+  currentAudio.volume = parseFloat(volumeControl.value);
+
+  currentAudio.play().catch((err) => {
+    console.error("Error playing audio:", err);
+    alert("❌ Error playing the announcement.");
+  });
+
+  // 🔹 Progress Bar
+  progressFill.style.width = "0%";
+  const interval = setInterval(() => {
+    if (currentAudio && !isNaN(currentAudio.duration)) {
+      const progress = (currentAudio.currentTime / currentAudio.duration) * 100;
+      progressFill.style.width = `${progress}%`;
+    }
+
+    if (!currentAudio || currentAudio.ended) {
+      clearInterval(interval);
+    }
+  }, 500);
+
+  nextAnnouncementEl.className = "now-playing";
 }
 
 // 🔹 Stop Audio Function
@@ -204,14 +239,22 @@ function stopAudio() {
 
   if (currentAudio) {
     currentAudio.pause();
-    currentAudio.currentTime = 0; // Reset audio to start
-    progressFill.style.width = "0%"; // Clear progress bar
-    currentAudio = null; // Clear reference
+    currentAudio.currentTime = 0;
+    progressFill.style.width = "0%";
+    currentAudio = null;
   }
 }
 
 // 🔹 "Play Now" Button
 playNowButton.addEventListener("click", () => {
+  playNextAnnouncement();
+});
+
+// 🔹 "Stop" Button
+stopButton.addEventListener("click", stopAudio);
+
+// 🔹 Play Next Announcement Function
+function playNextAnnouncement() {
   if (announcements.length === 0) {
     alert("No announcements to play.");
     return;
@@ -219,7 +262,4 @@ playNowButton.addEventListener("click", () => {
 
   const nextAnnouncement = announcements[0];
   playAudio(nextAnnouncement.audioURL, nextAnnouncement.title);
-});
-
-// 🔹 "Stop" Button
-stopButton.addEventListener("click", stopAudio);
+}
